@@ -21,7 +21,7 @@ static int g_fails;
 
 static void boot(void) {
     Board_CanLogClear();
-    Fsm_Init();
+    WheelLeg_Init();
 }
 
 static void feed(const char *text) {
@@ -351,6 +351,146 @@ static void test_fault_from_teleop_and_test(void) {
     CHECK(Teleop_Permit() == 1);
 }
 
+static void expect_enable(uint32_t index, uint16_t id) {
+    const BoardCanFrame *frame = Board_CanLogAt(index);
+    uint32_t i;
+    if (frame == 0) {
+        CHECK(frame != 0);
+        return;
+    }
+    CHECK(frame->id == id);
+    CHECK(frame->data[0] == MF9025_CMD_ENABLE);
+    for (i = 1u; i < 8u; i++) {
+        CHECK(frame->data[i] == 0u);
+    }
+}
+
+static void refresh_link(void) { feed("SPD 0\n"); }
+
+static void test_enable_on_init(void) {
+    uint16_t left = (uint16_t)(MF9025_CAN_CMD_BASE + MF9025_NODE_ID_LEFT);
+    uint16_t right = (uint16_t)(MF9025_CAN_CMD_BASE + MF9025_NODE_ID_RIGHT);
+    boot();
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == 2u);
+    CHECK(Board_CanLogCount() == 2u);
+    expect_enable(0u, left);
+    expect_enable(1u, right);
+    CHECK(Board_CanTxFailCount() == 0u);
+}
+
+static void test_enable_resend_every_second(void) {
+    uint32_t enables;
+    uint32_t speeds;
+    int i;
+    boot();
+    enables = Board_CanCmdCount(MF9025_CMD_ENABLE);
+    CHECK(enables == 2u);
+    for (i = 0; i < 999; i++) {
+        if ((i % 50) == 0) {
+            refresh_link();
+        }
+        App_Tick1kHz();
+    }
+    CHECK(Fsm_State() == FSM_TEST);
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == enables);
+    refresh_link();
+    App_Tick1kHz();
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == enables + 2u);
+    CHECK(Board_CanTxFailCount() == 0u);
+
+    /* Speed calls are counted separately and are not successes. */
+    Board_CanLogClear();
+    feed("TELEOP\n");
+    ticks(1);
+    feed("SEL 5\nSPD 20\nDIR 1\n");
+    ticks(5);
+    speeds = Board_CanCmdCount(MF9025_CMD_SPEED);
+    CHECK(speeds == 10u);
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == 0u);
+    CHECK(Board_CanTxFailCount() == 0u);
+}
+
+static void test_enable_stops_while_latched(void) {
+    uint16_t left = (uint16_t)(MF9025_CAN_CMD_BASE + MF9025_NODE_ID_LEFT);
+    uint16_t right = (uint16_t)(MF9025_CAN_CMD_BASE + MF9025_NODE_ID_RIGHT);
+    uint32_t enables;
+    uint32_t stops;
+    int i;
+    boot();
+    feed("ESTOP\n");
+    Board_CanLogClear();
+    ticks(1);
+    CHECK(Fsm_State() == FSM_ESTOP);
+    CHECK(Board_CanLogCount() == 2u);
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == 0u);
+    CHECK(Board_CanCmdCount(MF9025_CMD_STOP) == 2u);
+    expect_stop(0u, left);
+    expect_stop(1u, right);
+    MF9025_SendEnable((uint8_t)MF9025_NODE_ID_LEFT);
+    MF9025_SendEnable((uint8_t)MF9025_NODE_ID_RIGHT);
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == 0u);
+
+    stops = Board_CanCmdCount(MF9025_CMD_STOP);
+    for (i = 0; i < 1500; i++) {
+        App_Tick1kHz();
+    }
+    CHECK(Fsm_State() == FSM_ESTOP);
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == 0u);
+    CHECK(Board_CanCmdCount(MF9025_CMD_STOP) > stops);
+
+    feed("CLEAR\nSPD 0\n");
+    ticks(1);
+    CHECK(Fsm_State() == FSM_TEST);
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == 2u);
+    enables = Board_CanCmdCount(MF9025_CMD_ENABLE);
+    for (i = 0; i < 999; i++) {
+        if ((i % 50) == 0) {
+            refresh_link();
+        }
+        App_Tick1kHz();
+    }
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == enables);
+    refresh_link();
+    App_Tick1kHz();
+    CHECK(Fsm_State() == FSM_TEST);
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == enables + 2u);
+
+    Fsm_RaiseFault();
+    CHECK(Fsm_State() == FSM_FAULT);
+    Board_CanLogClear();
+    ticks(1);
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == 0u);
+    CHECK(Board_CanCmdCount(MF9025_CMD_STOP) == 2u);
+    for (i = 0; i < 1000; i++) {
+        App_Tick1kHz();
+    }
+    CHECK(Fsm_State() == FSM_FAULT);
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == 0u);
+    CHECK(Board_CanCmdCount(MF9025_CMD_STOP) > 2u);
+    feed("CLEAR\n");
+    ticks(1);
+    CHECK(Fsm_State() == FSM_TEST);
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == 2u);
+    CHECK(Board_CanTxFailCount() == 0u);
+}
+
+static void test_host_log_cap_does_not_cap_cmd_count(void) {
+    uint8_t data[8] = {MF9025_CMD_ENABLE, 0, 0, 0, 0, 0, 0, 0};
+    boot();
+    CHECK(Board_CanLogCount() == 2u);
+    ticks(31);
+    CHECK(Board_CanLogCount() == 64u);
+    CHECK(Board_CanCmdCount(MF9025_CMD_STOP) == 62u);
+    ticks(10);
+    CHECK(Board_CanLogCount() == 64u);
+    CHECK(Board_CanCmdCount(MF9025_CMD_STOP) == 82u);
+    Board_CanTxStd(0x800u, data);
+    Board_CanTxStd(0x145u, 0);
+    CHECK(Board_CanLogCount() == 64u);
+    CHECK(Board_CanCmdCount(MF9025_CMD_ENABLE) == 2u);
+    CHECK(Board_CanTxFailCount() == 0u);
+}
+
 static void test_current_placeholder_not_on_wire(void) {
     /* The drive-tool current limit must not appear in DATA[1..3]. */
     boot();
@@ -377,6 +517,10 @@ int main(void) {
     test_link_loss_latches();
     test_fault_from_teleop_and_test();
     test_current_placeholder_not_on_wire();
+    test_enable_on_init();
+    test_enable_resend_every_second();
+    test_enable_stops_while_latched();
+    test_host_log_cap_does_not_cap_cmd_count();
     if (g_fails != 0) {
         fprintf(stderr, "%d check(s) failed\n", g_fails);
         return 1;

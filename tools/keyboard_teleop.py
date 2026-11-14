@@ -46,7 +46,8 @@ SPD_STEP_DPS = 30.0
 SPD_MAX_DPS = 360.0
 RESEND_S = 0.05
 
-EVENT_FMT = "llHHi"
+# q is 8 bytes on Linux and Windows. ll is 8 only where long is 8.
+EVENT_FMT = "qqHHi"
 EV_KEY = 0x01
 
 # Linux input key codes.
@@ -198,10 +199,6 @@ def _self_test() -> int:
         if not cond:
             print(f"FAIL {message}", file=sys.stderr)
             failures += 1
-
-    if struct.calcsize(EVENT_FMT) != 24:
-        print("live mode expects a 64-bit input_event (24 bytes)", file=sys.stderr)
-        return 1
 
     tele = KeyboardTeleop()
     check(tele.handle("5", True, 0.0) == ["SEL 5"], "select 5")

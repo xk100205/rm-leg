@@ -30,7 +30,16 @@
 #define MF9025_CAN_CMD_BASE 0x140u
 
 #define MF9025_CMD_STOP 0x81u
+#define MF9025_CMD_ENABLE 0x88u
 #define MF9025_CMD_SPEED 0xA2u
+
+/*
+ * Motor ON (0x88) after init and once a second. Set to 0 if the driver
+ * firmware auto-enables on 0xA2.
+ */
+#ifndef MF9025_SEND_ENABLE
+#define MF9025_SEND_ENABLE 1
+#endif
 
 /* LK speed closed-loop unit: 0.01 dps per LSB. Not a torque scale. */
 #define MF9025_SPEED_LSB_DPS 0.01f

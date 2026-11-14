@@ -3,6 +3,7 @@
 
 CC ?= gcc
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -DWHEEL_LEG_HOST -ICore/Inc
+PYTHON ?= python3
 
 HOST_SRCS = \
 	Core/Src/board.c \
@@ -24,7 +25,7 @@ test-firmware:
 	./build/test_phase1
 
 test-host:
-	python3 tools/keyboard_teleop.py --self-test
+	$(PYTHON) tools/keyboard_teleop.py --self-test
 
 check-scope:
 	@if grep -nE 'RS01_SetSpeed' \
