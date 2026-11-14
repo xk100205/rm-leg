@@ -11,6 +11,12 @@
 void Board_CanTxStd(uint16_t id, const uint8_t data[8]);
 
 /*
+ * Times the FDCAN TX queue rejected a frame. The host stub has no
+ * failure path, so this stays 0 there. Not a count of calls.
+ */
+uint32_t Board_CanTxFailCount(void);
+
+/*
  * Short critical section so a UART RX interrupt cannot tear a command
  * the 1 kHz tick is copying. Not nestable. Host builds no-op it.
  */

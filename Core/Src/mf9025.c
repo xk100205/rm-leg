@@ -1,6 +1,7 @@
 #include "mf9025.h"
 
 #include "board.h"
+#include "fsm.h"
 #include "wheel_leg_config.h"
 
 static int node_ok(uint8_t node_id) {
@@ -61,4 +62,29 @@ void MF9025_SendStop(uint8_t node_id) {
         data[i] = 0u;
     }
     send(node_id, data);
+}
+
+void MF9025_SendEnable(uint8_t node_id) {
+#if !MF9025_SEND_ENABLE
+    (void)node_id;
+#else
+    uint8_t data[8];
+    uint32_t i;
+    FsmState st;
+
+    /*
+     * Gate the enable byte itself. A 1 Hz resend after 0x81 would turn
+     * the drive back on and undo the stop. CLEAR leaves ESTOP/FAULT
+     * before the next poll, so the same call resumes.
+     */
+    st = Fsm_State();
+    if (st == FSM_ESTOP || st == FSM_FAULT) {
+        return;
+    }
+    data[0] = MF9025_CMD_ENABLE;
+    for (i = 1u; i < 8u; i++) {
+        data[i] = 0u;
+    }
+    send(node_id, data);
+#endif
 }

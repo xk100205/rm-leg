@@ -13,6 +13,7 @@
 static BoardCanFrame s_log[BOARD_CAN_LOG_CAP];
 static uint32_t s_log_n;
 static uint32_t s_cmd[256];
+static uint32_t s_tx_fail;
 
 void Board_IrqLock(void) {}
 void Board_IrqUnlock(void) {}
@@ -33,6 +34,8 @@ const BoardCanFrame *Board_CanLogAt(uint32_t index) {
 }
 
 uint32_t Board_CanCmdCount(uint8_t cmd) { return s_cmd[cmd]; }
+
+uint32_t Board_CanTxFailCount(void) { return s_tx_fail; }
 
 void Board_CanTxStd(uint16_t id, const uint8_t data[8]) {
     uint32_t i;
@@ -60,6 +63,7 @@ extern FDCAN_HandleTypeDef hfdcan1;
 extern UART_HandleTypeDef huart5;
 
 static uint8_t s_uart5_rx_byte;
+static uint32_t s_tx_fail;
 
 void Board_IrqLock(void) { __disable_irq(); }
 void Board_IrqUnlock(void) { __enable_irq(); }
@@ -78,10 +82,15 @@ void Board_CanTxStd(uint16_t id, const uint8_t data[8]) {
     tx.FDFormat = FDCAN_CLASSIC_CAN;
     tx.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
     tx.MessageMarker = 0;
-    /* Non-blocking. A full TX FIFO drops this tick; the next tick retries.
-     * Classic 11-bit frame on FDCAN1 only. */
-    (void)HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &tx, (uint8_t *)data);
+    /* Non-blocking. The queue rejects a frame when the TX FIFO is full
+     * or the peripheral is not ready; count that and let the next tick
+     * retry. Classic 11-bit frame on FDCAN1 only. */
+    if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &tx, (uint8_t *)data) != HAL_OK) {
+        s_tx_fail++;
+    }
 }
+
+uint32_t Board_CanTxFailCount(void) { return s_tx_fail; }
 
 void Board_DebugUartInit(void) {
     GPIO_InitTypeDef gpio;
